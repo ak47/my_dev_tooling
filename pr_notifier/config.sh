@@ -36,7 +36,7 @@ INCLUDE_DRAFTS=false
 # Filter out PRs already approved by this user (optional)
 # Set to your GitHub username to exclude PRs you've already approved
 # Leave empty to include all matching PRs regardless of approval status
-GITHUB_USER_HANDLE="ak47"
+GITHUB_USER_HANDLE="your-username"
 
 # Always notify about all matching PRs (true/false)
 # Set to true to notify about all matching PRs on every run, even if previously notified
