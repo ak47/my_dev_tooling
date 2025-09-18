@@ -1,6 +1,25 @@
 # GitHub Team PR Checker
 
+![GitHub](https://img.shields.io/badge/GitHub-CLI-blue?logo=github)
+![Slack](https://img.shields.io/badge/Slack-Notifications-4A154B?logo=slack)
+![Shell](https://img.shields.io/badge/Shell-Bash-green?logo=gnu-bash)
+
 Automated Slack notifications for team pull requests across multiple GitHub repositories. Get notified when PRs matching your team's branch patterns or created by team members are ready for review.
+
+## Table of Contents
+
+- [Features](#features)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Configuration Examples](#configuration-examples)
+- [Monitoring & Troubleshooting](#monitoring--troubleshooting)
+- [File Structure](#file-structure)
+- [Slack Notification Format](#slack-notification-format)
+- [Configuration File (config.sh)](#configuration-file-configsh)
+- [Customization](#customization)
+- [Security Notes](#security-notes)
+- [Support](#support)
+- [License](#license)
 
 ## Features
 
@@ -28,7 +47,8 @@ brew install gh
 ```
 
 #### Other platforms
-Visit: https://cli.github.com/manual/installation
+
+Visit: [GitHub CLI Installation Guide](https://cli.github.com/manual/installation)
 
 ### Step 2: Authenticate GitHub CLI
 
@@ -44,8 +64,8 @@ gh auth status
 
 ### Step 3: Set Up Slack Webhook
 
-1. Go to https://api.slack.com/apps
-2. Click **"Create New App"** → **"From scratch"**
+1. Go to [Slack API Apps](https://api.slack.com/apps)
+2. Click **"Create New App"** > **"From scratch"**
 3. Name your app (e.g., "GitHub PR Notifier") and select your workspace
 4. In the app settings, go to **"Incoming Webhooks"**
 5. Toggle **"Activate Incoming Webhooks"** to ON
@@ -292,7 +312,8 @@ Clear the processed PRs file to reset:
 ## File Structure
 
 After setup, you'll have:
-```
+
+```text
 ~/scripts/
 ├── check-team-prs.sh           # Main script
 ├── check-prs-wrapper.sh        # Wrapper script for cron
@@ -401,9 +422,10 @@ fi
 ## Support
 
 For issues with:
-- **GitHub CLI**: https://cli.github.com/manual/
-- **Slack Webhooks**: https://api.slack.com/messaging/webhooks
-- **Cron syntax**: https://crontab.guru/
+
+- **GitHub CLI**: [GitHub CLI Manual](https://cli.github.com/manual/)
+- **Slack Webhooks**: [Slack Webhooks Documentation](https://api.slack.com/messaging/webhooks)
+- **Cron syntax**: [Crontab Guru](https://crontab.guru/)
 
 ## License
 
