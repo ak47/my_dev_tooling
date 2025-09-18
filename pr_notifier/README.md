@@ -131,6 +131,11 @@ GITHUB_USER_HANDLE=""
 # Set to false to only notify about new PRs (default behavior)
 ALWAYS_NOTIFY=false
 
+# Filter out PRs with failed automated checks (true/false)
+# Set to true to exclude PRs that have failed CI/CD checks (default behavior)
+# Set to false to include all PRs regardless of check status
+FILTER_FAILED_CHECKS=true
+
 # GitHub CLI path (optional - will use system PATH if not set)
 GITHUB_CLI_PATH="/usr/local/bin"
 
@@ -261,6 +266,15 @@ BRANCH_PREFIXES=("CRX-" "FEATURE-")
 ALWAYS_NOTIFY=true  # Notify about all matching PRs every time
 ```
 
+### Example 7: Include PRs with Failed Checks
+Get notified about all PRs, even those with failed CI/CD checks:
+```bash
+REPOS=("org/repo1" "org/repo2")
+TEAM_MEMBERS=("alice" "bob" "charlie")
+BRANCH_PREFIXES=("CRX-" "FEATURE-")
+FILTER_FAILED_CHECKS=false  # Include PRs with failed checks
+```
+
 ## Monitoring & Troubleshooting
 
 ### Check if cron is running:
@@ -348,6 +362,7 @@ The `config.sh` file centralizes all configuration settings, making it easy to m
 - **INCLUDE_DRAFTS**: Whether to include draft PRs (`true`/`false`)
 - **GITHUB_USER_HANDLE**: Your GitHub username to filter out already approved PRs
 - **ALWAYS_NOTIFY**: Whether to notify about all matching PRs on every run (`true`/`false`)
+- **FILTER_FAILED_CHECKS**: Whether to exclude PRs with failed CI/CD checks (`true`/`false`)
 - **SLACK_WEBHOOK_URL**: Slack webhook URL for notifications
 - **GITHUB_CLI_PATH**: Custom path to GitHub CLI (optional)
 - **LOG_LEVEL**: Logging verbosity (`DEBUG`, `INFO`, `WARN`, `ERROR`)
@@ -394,6 +409,17 @@ When always notify is enabled:
 - You'll get notifications about all matching PRs, even if previously notified
 - Useful for monitoring dashboards or when you want to see all current PRs
 - Console will show "Cleared processed PRs history (ALWAYS_NOTIFY enabled)"
+
+### Configure CI/CD check filtering
+Control whether to exclude PRs with failed automated checks:
+- `FILTER_FAILED_CHECKS=true` (default): Only notify about PRs with passing checks
+- `FILTER_FAILED_CHECKS=false`: Include all PRs regardless of check status
+
+When CI filtering is enabled:
+- PRs with failed CI/CD checks will be skipped with a console message
+- Only PRs with passing checks (or no checks) will trigger notifications
+- Useful for ensuring you only review PRs that are actually ready
+- Console will show "PR #123 has failed checks" for filtered PRs
 
 ### Add more filters
 Extend the script to filter by:

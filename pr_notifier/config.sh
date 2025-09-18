@@ -36,12 +36,17 @@ INCLUDE_DRAFTS=false
 # Filter out PRs already approved by this user (optional)
 # Set to your GitHub username to exclude PRs you've already approved
 # Leave empty to include all matching PRs regardless of approval status
-GITHUB_USER_HANDLE=""
+GITHUB_USER_HANDLE="ak47"
 
 # Always notify about all matching PRs (true/false)
 # Set to true to notify about all matching PRs on every run, even if previously notified
 # Set to false to only notify about new PRs (default behavior)
-ALWAYS_NOTIFY=false
+ALWAYS_NOTIFY=true
+
+# Filter out PRs with failed automated checks (true/false)
+# Set to true to exclude PRs that have failed CI/CD checks (default behavior)
+# Set to false to include all PRs regardless of check status
+FILTER_FAILED_CHECKS=true
 
 # Slack webhook URL
 # Set as environment variable or replace with actual URL

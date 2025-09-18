@@ -233,6 +233,42 @@ user_has_approved() {
     return $?
 }
 
+# Function to check if PR has failed automated checks
+pr_has_failed_checks() {
+    local repo="$1"
+    local pr_number="$2"
+    
+    # If CI filtering is disabled, don't check
+    if [ "$FILTER_FAILED_CHECKS" != "true" ]; then
+        return 1
+    fi
+    
+    # Get the head commit SHA for this PR (more efficient than getting all commits)
+    local head_sha=$(gh pr view "$pr_number" --repo "$repo" --json headRefOid -q '.headRefOid' 2>/dev/null)
+    
+    # If we can't get the head SHA, assume checks are passing (don't filter out)
+    if [ $? -ne 0 ] || [ -z "$head_sha" ]; then
+        return 1
+    fi
+    
+    # Get check runs for this specific commit (more targeted API call)
+    local check_runs=$(gh api "repos/${repo}/commits/${head_sha}/check-runs?per_page=50&status=completed" 2>/dev/null)
+    
+    # If we can't get check runs, assume checks are passing (don't filter out)
+    if [ $? -ne 0 ] || [ -z "$check_runs" ]; then
+        return 1
+    fi
+    
+    # Check if any completed check runs have failed
+    local failed_checks=$(echo "$check_runs" | jq -r '.check_runs[] | select(.conclusion == "failure") | .name' 2>/dev/null)
+    
+    if [ -n "$failed_checks" ]; then
+        return 0  # Has failed checks
+    fi
+    
+    return 1  # No failed checks
+}
+
 # Main execution
 echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${YELLOW}Checking for team PRs...${NC}"
@@ -252,6 +288,11 @@ if [ "$ALWAYS_NOTIFY" = "true" ]; then
     echo -e "${BLUE}Always notify: Enabled (will notify about all matching PRs)${NC}"
 else
     echo -e "${BLUE}Always notify: Disabled (only new PRs)${NC}"
+fi
+if [ "$FILTER_FAILED_CHECKS" = "true" ]; then
+    echo -e "${BLUE}CI filtering: Enabled (exclude PRs with failed checks)${NC}"
+else
+    echo -e "${BLUE}CI filtering: Disabled (include all PRs)${NC}"
 fi
 echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
@@ -331,6 +372,12 @@ for repo in "${REPOS[@]}"; do
         # Check if user has already approved this PR
         if user_has_approved "$pr_reviews" "$GITHUB_USER_HANDLE"; then
             echo "  • PR #${pr_number} already approved by ${GITHUB_USER_HANDLE} (${pr_author} - ${pr_branch})"
+            continue
+        fi
+        
+        # Check if PR has failed automated checks
+        if pr_has_failed_checks "$repo" "$pr_number"; then
+            echo "  • PR #${pr_number} has failed checks (${pr_author} - ${pr_branch})"
             continue
         fi
         
