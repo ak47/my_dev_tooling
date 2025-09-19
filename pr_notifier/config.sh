@@ -41,7 +41,7 @@ GITHUB_USER_HANDLE="your-username"
 # Always notify about all matching PRs (true/false)
 # Set to true to notify about all matching PRs on every run, even if previously notified
 # Set to false to only notify about new PRs (default behavior)
-ALWAYS_NOTIFY=true
+ALWAYS_NOTIFY=false
 
 # Filter out PRs with failed automated checks (true/false)
 # Set to true to exclude PRs that have failed CI/CD checks (default behavior)
