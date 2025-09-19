@@ -358,6 +358,8 @@ PATH=/usr/local/bin:/usr/bin:/bin
 - Make sure `GITHUB_TOKEN` is properly set in `config.sh`
 - Verify the token is valid and not expired
 - Check that the token has the required scopes (`repo`, `read:org`)
+- Enable debug mode by setting `LOG_LEVEL="DEBUG"` in `config.sh` for more information
+- Ensure the cron job has access to the GitHub CLI: `which gh` in your cron environment
 - Check repository name spelling (format: `owner/repo`)
 - Re-authenticate: `gh auth refresh`
 

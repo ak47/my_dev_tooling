@@ -43,13 +43,6 @@ if ! command -v gh &> /dev/null; then
     exit 1
 fi
 
-# Check if authenticated
-if ! gh auth status &> /dev/null; then
-    echo -e "${RED}Error: Not authenticated with GitHub CLI${NC}"
-    echo "Run: gh auth login"
-    exit 1
-fi
-
 # Check if Slack webhook is configured
 if [ -z "$SLACK_WEBHOOK_URL" ]; then
     echo -e "${RED}Error: SLACK_WEBHOOK_URL is not set${NC}"
@@ -86,13 +79,27 @@ authenticate_github() {
             echo -e "${GREEN}✓ GitHub authentication successful${NC}"
         else
             echo -e "${YELLOW}⚠ GitHub token authentication failed, trying to login...${NC}"
-            # Try to authenticate with the token
-            echo "$GITHUB_TOKEN" | gh auth login --with-token 2>/dev/null
-            if [ $? -eq 0 ]; then
+            # Try to authenticate with the token using a more direct approach
+            # Create a temporary file with the token for non-interactive login
+            local temp_token_file=$(mktemp)
+            echo "$GITHUB_TOKEN" > "$temp_token_file"
+            
+            # Try to login with the token file
+            if gh auth login --with-token < "$temp_token_file" 2>/dev/null; then
                 echo -e "${GREEN}✓ GitHub authentication successful${NC}"
             else
-                echo -e "${YELLOW}⚠ GitHub authentication failed, continuing with existing auth${NC}"
+                echo -e "${YELLOW}⚠ GitHub authentication failed, trying alternative method...${NC}"
+                # Alternative: try to set the token directly in GitHub CLI config
+                gh config set token "$GITHUB_TOKEN" 2>/dev/null
+                if gh api user 2>/dev/null >/dev/null; then
+                    echo -e "${GREEN}✓ GitHub authentication successful (via config)${NC}"
+                else
+                    echo -e "${YELLOW}⚠ GitHub authentication failed, continuing with existing auth${NC}"
+                fi
             fi
+            
+            # Clean up temp file
+            rm -f "$temp_token_file"
         fi
     else
         echo -e "${BLUE}No GitHub token provided, using existing authentication${NC}"
@@ -332,6 +339,23 @@ echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━�
 
 # Authenticate with GitHub
 authenticate_github
+
+# Verify authentication worked
+if ! gh auth status &> /dev/null; then
+    echo -e "${RED}Error: Not authenticated with GitHub CLI${NC}"
+    echo "Run: gh auth login or check your GITHUB_TOKEN in config.sh"
+    
+    # Debug information
+    if [ "$LOG_LEVEL" = "DEBUG" ]; then
+        echo -e "${YELLOW}Debug information:${NC}"
+        echo "GITHUB_TOKEN is set: $([ -n "$GITHUB_TOKEN" ] && echo "Yes" || echo "No")"
+        echo "GitHub CLI version: $(gh --version 2>/dev/null || echo "Not available")"
+        echo "Current user: $(whoami)"
+        echo "Current directory: $(pwd)"
+    fi
+    
+    exit 1
+fi
 
 # Clear processed PRs file if ALWAYS_NOTIFY is enabled
 if [ "$ALWAYS_NOTIFY" = "true" ]; then
