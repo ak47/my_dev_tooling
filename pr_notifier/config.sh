@@ -5,9 +5,8 @@
 
 # List of repositories to check (format: owner/repo)
 REPOS=(
-    "mudflapapp/mudflap-api"
-    # "mudflapapp/another-repo"
-    # "mudflapapp/third-repo"
+    # "owner/another-repo"
+    # "organization/third-repo"
 )
 
 # Team member GitHub handles (optional - leave empty to only use branch pattern)
@@ -20,8 +19,6 @@ TEAM_MEMBERS=(
 # Branch prefix pattern (optional - leave empty to only use team members)
 # Supports multiple prefixes
 BRANCH_PREFIXES=(
-    "CRX-"
-    "crx-"
     # "FEATURE-"
     # "feature-"
 )
