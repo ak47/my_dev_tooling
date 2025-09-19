@@ -309,6 +309,31 @@ pr_has_failed_checks() {
     return 1  # No failed checks
 }
 
+# Function to check if PR has requested reviewers we're monitoring
+has_requested_reviewers() {
+    local pr_review_requests="$1"
+    
+    # If no requested reviewers configured, return false
+    if [ ${#REQUESTED_REVIEWERS[@]} -eq 0 ]; then
+        return 1
+    fi
+    
+    # If review requests data is not available (no read:org scope), return false
+    if [ -z "$pr_review_requests" ] || [ "$pr_review_requests" = "null" ]; then
+        return 1
+    fi
+    
+    # Check if any of the requested reviewers match our configured reviewers
+    for reviewer in "${REQUESTED_REVIEWERS[@]}"; do
+        # Check for exact match in requested reviewers
+        if echo "$pr_review_requests" | jq -r --arg reviewer "$reviewer" '.[] | select(.login == $reviewer or .name == $reviewer) | .login' 2>/dev/null | grep -q "."; then
+            return 0  # Found matching reviewer
+        fi
+    done
+    
+    return 1  # No matching reviewers
+}
+
 # Main execution
 log_session_start
 echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -319,6 +344,9 @@ if [ ${#BRANCH_PREFIXES[@]} -gt 0 ]; then
 fi
 if [ ${#TEAM_MEMBERS[@]} -gt 0 ]; then
     echo -e "${BLUE}Team members: ${#TEAM_MEMBERS[@]} configured${NC}"
+fi
+if [ ${#REQUESTED_REVIEWERS[@]} -gt 0 ]; then
+    echo -e "${BLUE}Requested reviewers: ${#REQUESTED_REVIEWERS[@]} configured${NC}"
 fi
 if [ -n "$GITHUB_USER_HANDLE" ]; then
     echo -e "${BLUE}Approval filtering: Enabled (${GITHUB_USER_HANDLE})${NC}"
@@ -377,6 +405,12 @@ for repo in "${REPOS[@]}"; do
         continue
     fi
     
+    # Determine JSON fields based on configuration
+    json_fields="number,title,author,headRefName,url,isDraft,reviews"
+    if [ ${#REQUESTED_REVIEWERS[@]} -gt 0 ]; then
+        json_fields="${json_fields},reviewRequests"
+    fi
+    
     # Get all open PRs (with optional draft filtering)
     if [ "$INCLUDE_DRAFTS" = "true" ]; then
         # Include all PRs (drafts and non-drafts)
@@ -384,7 +418,7 @@ for repo in "${REPOS[@]}"; do
             --repo "$repo" \
             --state open \
             --limit 100 \
-            --json number,title,author,headRefName,url,isDraft,reviews | \
+            --json "$json_fields" | \
         jq -r '.[] | @json'
     else
         # Exclude draft PRs (default behavior)
@@ -392,7 +426,7 @@ for repo in "${REPOS[@]}"; do
             --repo "$repo" \
             --state open \
             --limit 100 \
-            --json number,title,author,headRefName,url,isDraft,reviews | \
+            --json "$json_fields" | \
         jq -r '.[] | select(.isDraft == false) | @json'
     fi | \
     while IFS= read -r pr_json; do
@@ -404,6 +438,7 @@ for repo in "${REPOS[@]}"; do
         pr_url=$(echo "$pr_json" | jq -r '.url')
         pr_is_draft=$(echo "$pr_json" | jq -r '.isDraft')
         pr_reviews=$(echo "$pr_json" | jq -r '.reviews')
+        pr_review_requests=$(echo "$pr_json" | jq -r '.reviewRequests // empty')
         
         # Create unique ID for this PR (repo + number)
         pr_id="${repo}#${pr_number}"
@@ -422,6 +457,15 @@ for repo in "${REPOS[@]}"; do
                 match_reason="member"
             else
                 match_reason="both"
+            fi
+        fi
+        
+        # Check if PR has requested reviewers we're monitoring
+        if has_requested_reviewers "$pr_review_requests"; then
+            if [ -z "$match_reason" ]; then
+                match_reason="reviewer"
+            else
+                match_reason="multiple"
             fi
         fi
         
@@ -460,6 +504,12 @@ for repo in "${REPOS[@]}"; do
             echo -e "${GREEN}  ✓ Found new PR #${pr_number} (branch pattern: ${pr_branch})${draft_indicator}${NC}"
         elif [ "$match_reason" = "member" ]; then
             echo -e "${GREEN}  ✓ Found new PR #${pr_number} (team member: ${pr_author})${draft_indicator}${NC}"
+        elif [ "$match_reason" = "reviewer" ]; then
+            echo -e "${GREEN}  ✓ Found new PR #${pr_number} (requested reviewer)${draft_indicator}${NC}"
+        elif [ "$match_reason" = "both" ]; then
+            echo -e "${GREEN}  ✓ Found new PR #${pr_number} (team member: ${pr_author}, branch: ${pr_branch})${draft_indicator}${NC}"
+        elif [ "$match_reason" = "multiple" ]; then
+            echo -e "${GREEN}  ✓ Found new PR #${pr_number} (multiple criteria)${draft_indicator}${NC}"
         else
             echo -e "${GREEN}  ✓ Found new PR #${pr_number} (team member: ${pr_author}, branch: ${pr_branch})${draft_indicator}${NC}"
         fi

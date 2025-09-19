@@ -107,6 +107,15 @@ TEAM_MEMBERS=(
     "jane-smith"
 )
 
+# Requested reviewers to monitor (optional)
+# Include PRs where these users or teams are requested as reviewers
+# Supports individual users (e.g., "username") and teams (e.g., "org/team-name")
+REQUESTED_REVIEWERS=(
+    # "your-username"              # Individual user
+    # "team-name"                  # Team name
+    # "organization/team-name"     # Full team path
+)
+
 # Branch prefixes to match (optional)
 BRANCH_PREFIXES=(
     "CRX-"
@@ -225,7 +234,7 @@ Cron jobs run in a minimal environment without access to your interactive GitHub
 1. **Create a GitHub Personal Access Token**:
    - Go to [GitHub Settings > Personal Access Tokens](https://github.com/settings/tokens)
    - Click "Generate new token (classic)"
-   - Select scopes: `repo` (for private repos) and `read:org` (for organization access)
+   - Select scopes: `repo` (for private repos), `read:org` (for organization access and review requests)
    - Copy the generated token
 
 2. **Add Token to config.sh**:
@@ -304,6 +313,16 @@ BRANCH_PREFIXES=("CRX-" "FEATURE-")
 FILTER_FAILED_CHECKS=false  # Include PRs with failed checks
 ```
 
+### Example 8: Monitor Requested Reviewers
+Get notified about PRs where you or your team are requested as reviewers:
+```bash
+REPOS=("org/repo1" "org/repo2")
+REQUESTED_REVIEWERS=("your-username" "team-name" "org/backend-team")
+# This will notify about PRs where any of these are requested as reviewers
+```
+
+**Note**: This feature requires a GitHub token with `read:org` scope. If the scope is not available, the feature will be disabled gracefully.
+
 ## Monitoring & Troubleshooting
 
 ### Check if cron is running:
@@ -351,7 +370,7 @@ PATH=/usr/local/bin:/usr/bin:/bin
 
 #### "Cannot access repo" error
 - Verify you have read access to the repository
-- Check that your GitHub token has the correct scopes (`repo` for private repos)
+- Check that your GitHub token has the correct scopes (`repo` for private repos, `read:org` for review requests)
 - Ensure `GITHUB_TOKEN` is set in your `config.sh`
 
 #### "GitHub authentication failed" in cron
@@ -410,6 +429,7 @@ The `config.sh` file centralizes all configuration settings, making it easy to m
 
 - **REPOS**: Array of repositories to monitor (format: `owner/repo`)
 - **TEAM_MEMBERS**: Array of GitHub usernames to monitor
+- **REQUESTED_REVIEWERS**: Array of users/teams to monitor as requested reviewers
 - **BRANCH_PREFIXES**: Array of branch name prefixes to match
 - **MIN_DIGITS**: Minimum digits required after branch prefix
 - **INCLUDE_DRAFTS**: Whether to include draft PRs (`true`/`false`)

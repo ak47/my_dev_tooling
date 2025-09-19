@@ -16,6 +16,15 @@ TEAM_MEMBERS=(
     # "username3"
 )
 
+# Requested reviewers to monitor (optional)
+# Include PRs where these users or teams are requested as reviewers
+# Supports individual users (e.g., "username") and teams (e.g., "org/team-name")
+REQUESTED_REVIEWERS=(
+    # "ak47"                    # Individual user
+    # "carrier-x"              # Team name
+    # "mudflapapp/backend-team" # Full team path
+)
+
 # Branch prefix pattern (optional - leave empty to only use team members)
 # Supports multiple prefixes
 BRANCH_PREFIXES=(
