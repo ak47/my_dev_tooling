@@ -21,6 +21,7 @@ source "$CONFIG_FILE"
 LOGS_DIR="${SCRIPT_DIR}/logs"
 mkdir -p "${LOGS_DIR}"
 PROCESSED_PRS_FILE="${LOGS_DIR}/processed_team_prs.txt"  # Tracks which PRs we've already notified about
+LOG_FILE="${LOGS_DIR}/pr-check.log"  # Main log file
 
 # Colors for output
 RED='\033[0;31m'
@@ -65,6 +66,38 @@ fi
 
 # Create processed PRs file if it doesn't exist
 touch "$PROCESSED_PRS_FILE"
+
+# Function to log session start timestamp
+log_session_start() {
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "" >> "$LOG_FILE"
+    echo "=== PR Check Session Started: $timestamp ===" >> "$LOG_FILE"
+}
+
+# Function to authenticate with GitHub CLI
+authenticate_github() {
+    if [ -n "$GITHUB_TOKEN" ]; then
+        echo -e "${BLUE}Authenticating with GitHub using token...${NC}"
+        # Set the token as an environment variable for GitHub CLI
+        export GITHUB_TOKEN
+        
+        # Test if the token works by making a simple API call
+        if gh api user 2>/dev/null >/dev/null; then
+            echo -e "${GREEN}✓ GitHub authentication successful${NC}"
+        else
+            echo -e "${YELLOW}⚠ GitHub token authentication failed, trying to login...${NC}"
+            # Try to authenticate with the token
+            echo "$GITHUB_TOKEN" | gh auth login --with-token 2>/dev/null
+            if [ $? -eq 0 ]; then
+                echo -e "${GREEN}✓ GitHub authentication successful${NC}"
+            else
+                echo -e "${YELLOW}⚠ GitHub authentication failed, continuing with existing auth${NC}"
+            fi
+        fi
+    else
+        echo -e "${BLUE}No GitHub token provided, using existing authentication${NC}"
+    fi
+}
 
 # Function to check if branch matches any prefix pattern
 matches_branch_pattern() {
@@ -270,6 +303,7 @@ pr_has_failed_checks() {
 }
 
 # Main execution
+log_session_start
 echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${YELLOW}Checking for team PRs...${NC}"
 echo -e "${BLUE}Repos: ${#REPOS[@]} configured${NC}"
@@ -295,6 +329,9 @@ else
     echo -e "${BLUE}CI filtering: Disabled (include all PRs)${NC}"
 fi
 echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+
+# Authenticate with GitHub
+authenticate_github
 
 # Clear processed PRs file if ALWAYS_NOTIFY is enabled
 if [ "$ALWAYS_NOTIFY" = "true" ]; then

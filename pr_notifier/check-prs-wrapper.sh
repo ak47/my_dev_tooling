@@ -27,5 +27,10 @@ if [ -n "$GITHUB_CLI_PATH" ]; then
     export PATH="${GITHUB_CLI_PATH}:${PATH}"
 fi
 
+if [ -n "$GITHUB_TOKEN" ]; then
+    export GITHUB_TOKEN
+    echo "GitHub token set"
+fi
+
 # Run the main script
 "${SCRIPT_DIR}/check-team-prs.sh"

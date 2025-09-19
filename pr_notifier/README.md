@@ -139,6 +139,10 @@ FILTER_FAILED_CHECKS=true
 # GitHub CLI path (optional - will use system PATH if not set)
 GITHUB_CLI_PATH="/usr/local/bin"
 
+# GitHub token for authentication (required for cron jobs)
+# Get your token from: https://github.com/settings/tokens
+GITHUB_TOKEN="your-github-token-here"
+
 # Logging configuration
 LOG_LEVEL="INFO"  # DEBUG, INFO, WARN, ERROR
 MAX_PROCESSED_PRS=500  # Maximum number of processed PRs to keep in history
@@ -211,6 +215,31 @@ chmod +x ~/scripts/pr-checker-wrapper.sh
 # Then in crontab:
 */15 * * * * /home/your-user/scripts/pr-checker-wrapper.sh >> /home/your-user/scripts/logs/cron.log 2>&1
 ```
+
+## GitHub Authentication
+
+### For Cron Jobs
+
+Cron jobs run in a minimal environment without access to your interactive GitHub CLI authentication. You need to provide a GitHub personal access token:
+
+1. **Create a GitHub Personal Access Token**:
+   - Go to [GitHub Settings > Personal Access Tokens](https://github.com/settings/tokens)
+   - Click "Generate new token (classic)"
+   - Select scopes: `repo` (for private repos) and `read:org` (for organization access)
+   - Copy the generated token
+
+2. **Add Token to config.sh**:
+   ```bash
+   GITHUB_TOKEN="ghp_your-token-here"
+   ```
+
+3. **The script will automatically authenticate** using this token when running
+
+### For Interactive Use
+
+If you're running the script manually, you can either:
+- Use the token in `config.sh` (recommended for consistency)
+- Or authenticate manually: `gh auth login`
 
 ## Configuration Examples
 
@@ -291,6 +320,20 @@ tail -f ~/scripts/logs/check_summary.log
 cat ~/scripts/logs/processed_team_prs.txt
 ```
 
+### View PR check logs with timestamps:
+```bash
+# View recent log entries
+tail -f ~/scripts/logs/pr-check.log
+
+# View all log entries
+cat ~/scripts/logs/pr-check.log
+```
+
+**Log Format**: Each session starts with a timestamp header:
+```
+=== PR Check Session Started: 2025-09-19 12:44:33 ===
+```
+
 ### Test Slack webhook:
 ```bash
 curl -X POST -H 'Content-Type: application/json' \
@@ -308,6 +351,13 @@ PATH=/usr/local/bin:/usr/bin:/bin
 
 #### "Cannot access repo" error
 - Verify you have read access to the repository
+- Check that your GitHub token has the correct scopes (`repo` for private repos)
+- Ensure `GITHUB_TOKEN` is set in your `config.sh`
+
+#### "GitHub authentication failed" in cron
+- Make sure `GITHUB_TOKEN` is properly set in `config.sh`
+- Verify the token is valid and not expired
+- Check that the token has the required scopes (`repo`, `read:org`)
 - Check repository name spelling (format: `owner/repo`)
 - Re-authenticate: `gh auth refresh`
 
@@ -334,6 +384,7 @@ After setup, you'll have:
 ├── config.sh                   # Configuration file
 └── logs/
     ├── processed_team_prs.txt  # Tracks notified PRs
+    ├── pr-check.log           # Main execution log with timestamps
     ├── check_summary.log       # Summary of each run
     └── cron.log               # Cron execution logs
 ```
@@ -365,6 +416,7 @@ The `config.sh` file centralizes all configuration settings, making it easy to m
 - **FILTER_FAILED_CHECKS**: Whether to exclude PRs with failed CI/CD checks (`true`/`false`)
 - **SLACK_WEBHOOK_URL**: Slack webhook URL for notifications
 - **GITHUB_CLI_PATH**: Custom path to GitHub CLI (optional)
+- **GITHUB_TOKEN**: GitHub personal access token for authentication (required for cron)
 - **LOG_LEVEL**: Logging verbosity (`DEBUG`, `INFO`, `WARN`, `ERROR`)
 - **MAX_PROCESSED_PRS**: Maximum processed PRs to keep in history
 

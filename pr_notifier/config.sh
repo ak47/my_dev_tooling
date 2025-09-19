@@ -54,6 +54,7 @@ SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL}"
 
 # GitHub CLI path (optional - will use system PATH if not set)
 GITHUB_CLI_PATH="/opt/homebrew/bin"
+GITHUB_TOKEN="your-github-token-here"
 
 # Logging configuration
 LOG_LEVEL="INFO"  # DEBUG, INFO, WARN, ERROR
