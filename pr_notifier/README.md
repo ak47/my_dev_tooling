@@ -34,6 +34,7 @@ Automated Slack notifications for team pull requests across multiple GitHub repo
 
 - Linux/macOS/WSL environment
 - GitHub CLI (`gh`) installed
+- GitHub personal access token with `repo` and `read:org` scopes
 - Slack workspace with incoming webhook configured
 - Access to the GitHub repositories you want to monitor
 
@@ -227,6 +228,22 @@ chmod +x ~/scripts/pr-checker-wrapper.sh
 
 ## GitHub Authentication
 
+### Required GitHub Token Scopes
+
+⚠️ **IMPORTANT**: Your GitHub personal access token must have the correct scopes to function properly. The script requires specific permissions to access organization data and review requests.
+
+**Required Scopes:**
+- `repo` - Access to private repositories
+- `read:org` - **REQUIRED** for organization access and review requests
+
+**Common Error:**
+If you see this error:
+```
+GraphQL: Your token has not been granted the required scopes to execute this query. The 'login' field requires one of the following scopes: ['read:org'], but your token has only been granted the: ['admin:repo_hook', 'codespace', 'copilot', 'delete:packages', 'gist', 'notifications', 'project', 'repo', 'workflow', 'write:discussion', 'write:packages'] scopes.
+```
+
+**Solution:** Update your token scopes at [GitHub Settings > Personal Access Tokens](https://github.com/settings/tokens) to include `read:org`.
+
 ### For Cron Jobs
 
 Cron jobs run in a minimal environment without access to your interactive GitHub CLI authentication. You need to provide a GitHub personal access token:
@@ -234,7 +251,9 @@ Cron jobs run in a minimal environment without access to your interactive GitHub
 1. **Create a GitHub Personal Access Token**:
    - Go to [GitHub Settings > Personal Access Tokens](https://github.com/settings/tokens)
    - Click "Generate new token (classic)"
-   - Select scopes: `repo` (for private repos), `read:org` (for organization access and review requests)
+   - **Select these scopes:**
+     - ✅ `repo` (for private repos)
+     - ✅ `read:org` (for organization access and review requests)
    - Copy the generated token
 
 2. **Add Token to config.sh**:
@@ -269,51 +288,21 @@ TEAM_MEMBERS=("alice" "bob" "charlie")
 BRANCH_PREFIXES=()  # Empty - only check team members
 ```
 
-### Example 3: Combined Filtering
-Monitor PRs that match branch patterns OR are from team members:
+### Example 3: Combined Filtering with Advanced Options
+Monitor PRs that match branch patterns OR are from team members, with additional filtering options:
 ```bash
 REPOS=("org/repo1" "org/repo2")
 TEAM_MEMBERS=("alice" "bob" "charlie")
 BRANCH_PREFIXES=("CRX-" "FEATURE-")
+
+# Optional advanced settings (uncomment as needed):
+# INCLUDE_DRAFTS=true                    # Include draft PRs in notifications
+# GITHUB_USER_HANDLE="your-username"    # Filter out PRs you've approved
+# ALWAYS_NOTIFY=true                    # Notify about all matching PRs every time
+# FILTER_FAILED_CHECKS=false            # Include PRs with failed checks
 ```
 
-### Example 4: Include Draft PRs
-Monitor all PRs including drafts (useful for early feedback):
-```bash
-REPOS=("org/repo1" "org/repo2")
-TEAM_MEMBERS=("alice" "bob" "charlie")
-BRANCH_PREFIXES=("CRX-" "FEATURE-")
-INCLUDE_DRAFTS=true  # Include draft PRs in notifications
-```
-
-### Example 5: Filter Out Already Approved PRs
-Only notify about PRs you haven't approved yet:
-```bash
-REPOS=("org/repo1" "org/repo2")
-TEAM_MEMBERS=("alice" "bob" "charlie")
-BRANCH_PREFIXES=("CRX-" "FEATURE-")
-GITHUB_USER_HANDLE="your-username"  # Filter out PRs you've approved
-```
-
-### Example 6: Always Notify About All Matching PRs
-Get notified about all matching PRs on every run (useful for monitoring):
-```bash
-REPOS=("org/repo1" "org/repo2")
-TEAM_MEMBERS=("alice" "bob" "charlie")
-BRANCH_PREFIXES=("CRX-" "FEATURE-")
-ALWAYS_NOTIFY=true  # Notify about all matching PRs every time
-```
-
-### Example 7: Include PRs with Failed Checks
-Get notified about all PRs, even those with failed CI/CD checks:
-```bash
-REPOS=("org/repo1" "org/repo2")
-TEAM_MEMBERS=("alice" "bob" "charlie")
-BRANCH_PREFIXES=("CRX-" "FEATURE-")
-FILTER_FAILED_CHECKS=false  # Include PRs with failed checks
-```
-
-### Example 8: Monitor Requested Reviewers
+### Example 4: Monitor Requested Reviewers
 Get notified about PRs where you or your team are requested as reviewers:
 ```bash
 REPOS=("org/repo1" "org/repo2")
@@ -321,7 +310,7 @@ REQUESTED_REVIEWERS=("your-username" "team-name" "org/backend-team")
 # This will notify about PRs where any of these are requested as reviewers
 ```
 
-**Note**: This feature requires a GitHub token with `read:org` scope. If the scope is not available, the feature will be disabled gracefully.
+**Note**: The requested reviewers feature requires a GitHub token with `read:org` scope. If the scope is not available, the feature will be disabled gracefully.
 
 ## Monitoring & Troubleshooting
 
@@ -372,6 +361,20 @@ PATH=/usr/local/bin:/usr/bin:/bin
 - Verify you have read access to the repository
 - Check that your GitHub token has the correct scopes (`repo` for private repos, `read:org` for review requests)
 - Ensure `GITHUB_TOKEN` is set in your `config.sh`
+
+#### "GraphQL: Your token has not been granted the required scopes" error
+This error occurs when your GitHub token is missing the `read:org` scope:
+
+```
+GraphQL: Your token has not been granted the required scopes to execute this query. The 'login' field requires one of the following scopes: ['read:org'], but your token has only been granted the: ['admin:repo_hook', 'codespace', 'copilot', 'delete:packages', 'gist', 'notifications', 'project', 'repo', 'workflow', 'write:discussion', 'write:packages'] scopes.
+```
+
+**Solution:**
+1. Go to [GitHub Settings > Personal Access Tokens](https://github.com/settings/tokens)
+2. Find your current token and click "Edit"
+3. Add the `read:org` scope to your token
+4. Save the changes
+5. Update your `config.sh` with the new token if needed
 
 #### "GitHub authentication failed" in cron
 - Make sure `GITHUB_TOKEN` is properly set in `config.sh`
