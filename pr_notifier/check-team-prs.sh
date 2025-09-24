@@ -141,56 +141,28 @@ is_team_member() {
     return 1
 }
 
-# Function to send Slack notification
-send_slack_notification() {
-    local pr_title="$1"
-    local pr_author="$2"
-    local pr_branch="$3"
-    local pr_url="$4"
-    local pr_number="$5"
-    local repo_name="$6"
-    local match_reason="$7"
-    local is_draft="$8"
+# Function to send consolidated Slack notification
+send_consolidated_slack_notification() {
+    local prs_data="$1"
+    local total_count="$2"
     
-    # Escape special characters for JSON
-    pr_title=$(echo "$pr_title" | sed 's/"/\\"/g')
-    
-    # Create match reason emoji and text
-    local match_emoji=""
-    local match_text=""
-    if [ "$match_reason" = "branch" ]; then
-        match_emoji="🌿"
-        match_text="Branch Pattern Match"
-    elif [ "$match_reason" = "member" ]; then
-        match_emoji="👤"
-        match_text="Team Member PR"
-    else
-        match_emoji="🔍"
-        match_text="Team PR"
+    # Create header text
+    local header_text="🔔 Team PRs Ready for Review"
+    local pr_text="PRs"
+    if [ "$total_count" -eq 1 ]; then
+        header_text="🔔 Team PR Ready for Review"
+        pr_text="PR"
     fi
     
-    # Add draft status to text
-    if [ "$is_draft" = "true" ]; then
-        match_text="${match_text} (Draft)"
-    fi
-    
-    # Set header text based on draft status
-    local header_text=""
-    if [ "$is_draft" = "true" ]; then
-        header_text="${match_emoji} Draft PR Created"
-    else
-        header_text="${match_emoji} PR Ready for Review"
-    fi
-    
-    local payload=$(cat <<EOF
-{
-    "text": "Team PR ready for review",
+    # Start building the JSON payload
+    local payload='{
+    "text": "Team PRs ready for review",
     "blocks": [
         {
             "type": "header",
             "text": {
                 "type": "plain_text",
-                "text": "${header_text}",
+                "text": "'"${header_text}"' ('"${total_count}"' '"${pr_text}"')",
                 "emoji": true
             }
         },
@@ -199,50 +171,74 @@ send_slack_notification() {
             "elements": [
                 {
                     "type": "mrkdwn",
-                    "text": "${match_text} | *${repo_name}*"
+                    "text": "🌿 Branch Pattern | 👤 Team Member | 👥 Requested Reviewer"
                 }
             ]
-        },
+        }'
+    
+    # Process each PR and add to payload
+    local temp_file=$(mktemp)
+    printf '%b' "$prs_data" > "$temp_file"
+    
+    while IFS='|' read -r pr_number pr_title pr_author pr_branch pr_url repo_name match_reason is_draft; do
+        # Skip empty lines
+        if [ -z "$pr_number" ]; then
+            continue
+        fi
+        
+        # Escape special characters for JSON
+        pr_title=$(echo "$pr_title" | sed 's/"/\\"/g' | sed 's/\\/\\\\/g')
+        pr_branch=$(echo "$pr_branch" | sed 's/"/\\"/g' | sed 's/\\/\\\\/g')
+        
+        # Create match reason emoji
+        local match_emoji=""
+        if [ "$match_reason" = "branch" ]; then
+            match_emoji="🌿"
+        elif [ "$match_reason" = "member" ]; then
+            match_emoji="👤"
+        elif [ "$match_reason" = "reviewer" ]; then
+            match_emoji="👥"
+        else
+            match_emoji="🔍"
+        fi
+        
+        # Add draft indicator
+        local draft_indicator=""
+        if [ "$is_draft" = "true" ]; then
+            draft_indicator=" *(Draft)*"
+        fi
+        
+        # Add section to payload
+        payload="${payload},
         {
-            "type": "section",
-            "fields": [
+            \"type\": \"section\",
+            \"fields\": [
                 {
-                    "type": "mrkdwn",
-                    "text": "*PR:* #${pr_number}"
+                    \"type\": \"mrkdwn\",
+                    \"text\": \"*${match_emoji} PR #${pr_number}*${draft_indicator}\\n<${pr_url}|${pr_title}>\"
                 },
                 {
-                    "type": "mrkdwn",
-                    "text": "*Author:* ${pr_author}"
-                },
-                {
-                    "type": "mrkdwn",
-                    "text": "*Branch:* \`${pr_branch}\`"
-                },
-                {
-                    "type": "mrkdwn",
-                    "text": "*Title:* ${pr_title}"
+                    \"type\": \"mrkdwn\",
+                    \"text\": \"*Author:* ${pr_author}\\n*Branch:* \`${pr_branch}\`\\n*Repo:* ${repo_name}\"
                 }
             ]
-        },
-        {
-            "type": "actions",
-            "elements": [
-                {
-                    "type": "button",
-                    "text": {
-                        "type": "plain_text",
-                        "text": "View PR",
-                        "emoji": true
-                    },
-                    "url": "${pr_url}",
-                    "style": "primary"
-                }
-            ]
-        }
+        }"
+    done < "$temp_file"
+    
+    # Clean up temp file
+    rm -f "$temp_file"
+    
+    # Close the JSON structure
+    payload="${payload}
     ]
-}
-EOF
-    )
+}"
+    
+    # Debug: Show payload if LOG_LEVEL is DEBUG
+    if [ "$LOG_LEVEL" = "DEBUG" ]; then
+        echo "Debug: Slack payload (first 20 lines):"
+        echo "$payload" | head -20
+        echo "..."
+    fi
     
     # Send to Slack
     response=$(curl -s -X POST "$SLACK_WEBHOOK_URL" \
@@ -250,10 +246,10 @@ EOF
         -d "$payload")
     
     if [ "$response" = "ok" ]; then
-        echo -e "${GREEN}✓ Notification sent for PR #${pr_number}${NC}"
+        echo -e "${GREEN}✓ Consolidated notification sent for ${total_count} PR(s)${NC}"
         return 0
     else
-        echo -e "${RED}✗ Failed to send notification for PR #${pr_number}: ${response}${NC}"
+        echo -e "${RED}✗ Failed to send consolidated notification: ${response}${NC}"
         return 1
     fi
 }
@@ -288,6 +284,9 @@ pr_has_failed_checks() {
     
     # If we can't get the head SHA, assume checks are passing (don't filter out)
     if [ $? -ne 0 ] || [ -z "$head_sha" ]; then
+        if [ "$LOG_LEVEL" = "DEBUG" ]; then
+            echo "    Debug: Could not get head SHA for PR #${pr_number}, assuming checks pass"
+        fi
         return 1
     fi
     
@@ -296,6 +295,9 @@ pr_has_failed_checks() {
     
     # If we can't get check runs, assume checks are passing (don't filter out)
     if [ $? -ne 0 ] || [ -z "$check_runs" ]; then
+        if [ "$LOG_LEVEL" = "DEBUG" ]; then
+            echo "    Debug: Could not get check runs for PR #${pr_number}, assuming checks pass"
+        fi
         return 1
     fi
     
@@ -303,9 +305,15 @@ pr_has_failed_checks() {
     local failed_checks=$(echo "$check_runs" | jq -r '.check_runs[] | select(.conclusion == "failure") | .name' 2>/dev/null)
     
     if [ -n "$failed_checks" ]; then
+        if [ "$LOG_LEVEL" = "DEBUG" ]; then
+            echo "    Debug: PR #${pr_number} has failed checks: $(echo "$failed_checks" | tr '\n' ', ' | sed 's/,$//')"
+        fi
         return 0  # Has failed checks
     fi
     
+    if [ "$LOG_LEVEL" = "DEBUG" ]; then
+        echo "    Debug: PR #${pr_number} has no failed checks"
+    fi
     return 1  # No failed checks
 }
 
@@ -391,9 +399,10 @@ if [ "$ALWAYS_NOTIFY" = "true" ]; then
     echo -e "${BLUE}Cleared processed PRs history (ALWAYS_NOTIFY enabled)${NC}"
 fi
 
-# Counters
+# Counters and data collection
 total_prs=0
 new_notifications=0
+prs_to_notify=""
 
 # Process each repository
 for repo in "${REPOS[@]}"; do
@@ -411,7 +420,8 @@ for repo in "${REPOS[@]}"; do
         json_fields="${json_fields},reviewRequests"
     fi
     
-    # Get all open PRs (with optional draft filtering)
+    # Get all open PRs (with optional draft filtering) and store in temporary file
+    temp_prs_file=$(mktemp)
     if [ "$INCLUDE_DRAFTS" = "true" ]; then
         # Include all PRs (drafts and non-drafts)
         gh pr list \
@@ -419,7 +429,7 @@ for repo in "${REPOS[@]}"; do
             --state open \
             --limit 100 \
             --json "$json_fields" | \
-        jq -r '.[] | @json'
+        jq -r '.[] | @json' > "$temp_prs_file"
     else
         # Exclude draft PRs (default behavior)
         gh pr list \
@@ -427,8 +437,10 @@ for repo in "${REPOS[@]}"; do
             --state open \
             --limit 100 \
             --json "$json_fields" | \
-        jq -r '.[] | select(.isDraft == false) | @json'
-    fi | \
+        jq -r '.[] | select(.isDraft == false) | @json' > "$temp_prs_file"
+    fi
+    
+    # Process each PR from the temporary file
     while IFS= read -r pr_json; do
         # Parse PR data
         pr_number=$(echo "$pr_json" | jq -r '.number')
@@ -515,14 +527,34 @@ for repo in "${REPOS[@]}"; do
         fi
         echo "    Title: ${pr_title}"
         
-        # Send notification
-        if send_slack_notification "$pr_title" "$pr_author" "$pr_branch" "$pr_url" "$pr_number" "$repo" "$match_reason" "$pr_is_draft"; then
-            # Mark PR as processed only if notification was successful
+        # Add PR to notification list (pipe-separated format)
+        prs_to_notify="${prs_to_notify}${pr_number}|${pr_title}|${pr_author}|${pr_branch}|${pr_url}|${repo}|${match_reason}|${pr_is_draft}\n"
+        
+        # Mark PR as processed (only if not in ALWAYS_NOTIFY mode)
+        if [ "$ALWAYS_NOTIFY" != "true" ]; then
             echo "$pr_id" >> "$PROCESSED_PRS_FILE"
-            new_notifications=$((new_notifications + 1))
         fi
-    done
+        new_notifications=$((new_notifications + 1))
+    done < "$temp_prs_file"
+    
+    # Clean up temporary file
+    rm -f "$temp_prs_file"
 done
+
+# Send consolidated notification if there are PRs to notify about
+if [ $new_notifications -gt 0 ]; then
+    if [ "$ALWAYS_NOTIFY" = "true" ]; then
+        echo -e "\n${BLUE}Sending consolidated notification for ALL ${new_notifications} matching PR(s) (ALWAYS_NOTIFY enabled)...${NC}"
+    else
+        echo -e "\n${BLUE}Sending consolidated notification for ${new_notifications} new PR(s)...${NC}"
+    fi
+    
+    if send_consolidated_slack_notification "$prs_to_notify" "$new_notifications"; then
+        echo -e "${GREEN}✓ Consolidated notification sent successfully${NC}"
+    else
+        echo -e "${RED}✗ Failed to send consolidated notification${NC}"
+    fi
+fi
 
 # Clean up old processed PRs (keep only last MAX_PROCESSED_PRS entries)
 if [ $(wc -l < "$PROCESSED_PRS_FILE") -gt $MAX_PROCESSED_PRS ]; then
@@ -533,9 +565,13 @@ fi
 echo ""
 echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 if [ $new_notifications -gt 0 ]; then
-    echo -e "${GREEN}✓ Sent ${new_notifications} new notification(s)${NC}"
+    if [ "$ALWAYS_NOTIFY" = "true" ]; then
+        echo -e "${GREEN}✓ Found ${new_notifications} matching PR(s) for notification (ALWAYS_NOTIFY enabled)${NC}"
+    else
+        echo -e "${GREEN}✓ Found ${new_notifications} new PR(s) for notification${NC}"
+    fi
 else
-    echo "No new team PRs to notify about"
+    echo "No team PRs to notify about"
 fi
 echo -e "Total team PRs open: ${total_prs}"
 echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
