@@ -21,6 +21,7 @@ source "$CONFIG_FILE"
 LOGS_DIR="${SCRIPT_DIR}/logs"
 mkdir -p "${LOGS_DIR}"
 PROCESSED_PRS_FILE="${LOGS_DIR}/processed_team_prs.txt"  # Tracks which PRs we've already notified about
+MORNING_LISTING_FILE="${LOGS_DIR}/morning_listing_sent.txt"  # Tracks when morning listing was last sent
 LOG_FILE="${LOGS_DIR}/pr-check.log"  # Main log file
 
 # Colors for output
@@ -342,6 +343,51 @@ has_requested_reviewers() {
     return 1  # No matching reviewers
 }
 
+# Function to check if morning listing was already sent today
+morning_listing_sent_today() {
+    if [ ! -f "$MORNING_LISTING_FILE" ]; then
+        return 1  # File doesn't exist, so not sent today
+    fi
+    
+    local today=$(date '+%Y-%m-%d')
+    local last_sent=$(cat "$MORNING_LISTING_FILE" 2>/dev/null)
+    
+    if [ "$last_sent" = "$today" ]; then
+        return 0  # Already sent today
+    else
+        return 1  # Not sent today
+    fi
+}
+
+# Function to mark morning listing as sent today
+mark_morning_listing_sent() {
+    local today=$(date '+%Y-%m-%d')
+    echo "$today" > "$MORNING_LISTING_FILE"
+}
+
+# Function to check if user is requested as reviewer for a specific PR
+user_is_requested_reviewer() {
+    local pr_review_requests="$1"
+    local user_handle="$2"
+    
+    # If no user handle configured, return false
+    if [ -z "$user_handle" ]; then
+        return 1
+    fi
+    
+    # If review requests data is not available (no read:org scope), return false
+    if [ -z "$pr_review_requests" ] || [ "$pr_review_requests" = "null" ]; then
+        return 1
+    fi
+    
+    # Check if user is in the requested reviewers list
+    if echo "$pr_review_requests" | jq -r --arg user "$user_handle" '.[] | select(.login == $user) | .login' 2>/dev/null | grep -q "."; then
+        return 0  # User is requested as reviewer
+    fi
+    
+    return 1  # User is not requested as reviewer
+}
+
 # Main execution
 log_session_start
 echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -371,6 +417,11 @@ if [ "$FILTER_FAILED_CHECKS" = "true" ]; then
 else
     echo -e "${BLUE}CI filtering: Disabled (include all PRs)${NC}"
 fi
+if [ "$MORNING_REVIEW_LISTING" = "true" ]; then
+    echo -e "${BLUE}Morning review listing: Enabled${NC}"
+else
+    echo -e "${BLUE}Morning review listing: Disabled${NC}"
+fi
 echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
 # Authenticate with GitHub
@@ -397,6 +448,185 @@ fi
 if [ "$ALWAYS_NOTIFY" = "true" ]; then
     > "$PROCESSED_PRS_FILE"
     echo -e "${BLUE}Cleared processed PRs history (ALWAYS_NOTIFY enabled)${NC}"
+fi
+
+# Check for morning review listing
+if [ "$MORNING_REVIEW_LISTING" = "true" ] && [ -n "$GITHUB_USER_HANDLE" ]; then
+    if ! morning_listing_sent_today; then
+        echo -e "\n${BLUE}🌅 Checking for morning review listing...${NC}"
+        
+        morning_review_prs=""
+        morning_review_count=0
+        
+        # Process each repository for morning review listing
+        for repo in "${REPOS[@]}"; do
+            echo -e "${BLUE}  Checking ${repo} for pending reviews...${NC}"
+            
+            # Check if repo exists and we have access
+            if ! gh repo view "$repo" &> /dev/null; then
+                echo -e "${RED}    ✗ Cannot access repo ${repo}${NC}"
+                continue
+            fi
+            
+            # Get all open PRs with review requests (honor draft and CI settings)
+            json_fields="number,title,author,headRefName,url,isDraft,reviews,reviewRequests"
+            
+            # Store PRs in temporary file to avoid subshell issues
+            temp_morning_file=$(mktemp)
+            if [ "$INCLUDE_DRAFTS" = "true" ]; then
+                # Include all PRs (drafts and non-drafts)
+                gh pr list \
+                    --repo "$repo" \
+                    --state open \
+                    --limit 100 \
+                    --json "$json_fields" | \
+                jq -r '.[] | @json' > "$temp_morning_file"
+            else
+                # Exclude draft PRs (default behavior)
+                gh pr list \
+                    --repo "$repo" \
+                    --state open \
+                    --limit 100 \
+                    --json "$json_fields" | \
+                jq -r '.[] | select(.isDraft == false) | @json' > "$temp_morning_file"
+            fi
+            
+            while IFS= read -r pr_json; do
+                # Parse PR data
+                pr_number=$(echo "$pr_json" | jq -r '.number')
+                pr_title=$(echo "$pr_json" | jq -r '.title')
+                pr_author=$(echo "$pr_json" | jq -r '.author.login')
+                pr_branch=$(echo "$pr_json" | jq -r '.headRefName')
+                pr_url=$(echo "$pr_json" | jq -r '.url')
+                pr_is_draft=$(echo "$pr_json" | jq -r '.isDraft')
+                pr_reviews=$(echo "$pr_json" | jq -r '.reviews')
+                pr_review_requests=$(echo "$pr_json" | jq -r '.reviewRequests // empty')
+                
+                # Check if user is requested as reviewer
+                if ! user_is_requested_reviewer "$pr_review_requests" "$GITHUB_USER_HANDLE"; then
+                    continue
+                fi
+                
+                # Check if user has already approved this PR
+                if user_has_approved "$pr_reviews" "$GITHUB_USER_HANDLE"; then
+                    echo "    • PR #${pr_number} already approved by ${GITHUB_USER_HANDLE} (${pr_author} - ${pr_branch})"
+                    continue
+                fi
+                
+                # Check if PR has failed automated checks (honor FILTER_FAILED_CHECKS setting)
+                if pr_has_failed_checks "$repo" "$pr_number"; then
+                    echo "    • PR #${pr_number} has failed checks (${pr_author} - ${pr_branch})"
+                    continue
+                fi
+                
+                # Add to morning review list
+                morning_review_prs="${morning_review_prs}${pr_number}|${pr_title}|${pr_author}|${pr_branch}|${pr_url}|${repo}|reviewer|${pr_is_draft}\n"
+                morning_review_count=$((morning_review_count + 1))
+                
+                echo -e "${GREEN}    ✓ Found PR #${pr_number} pending review (${pr_author} - ${pr_branch})${NC}"
+            done < "$temp_morning_file"
+            
+            # Clean up temporary file
+            rm -f "$temp_morning_file"
+        done
+        
+        # Send morning review listing if there are PRs
+        if [ $morning_review_count -gt 0 ]; then
+            echo -e "\n${BLUE}🌅 Sending morning review listing for ${morning_review_count} PR(s)...${NC}"
+            
+            # Create morning-specific notification
+            header_text="🌅 Morning Review Summary"
+            pr_text="PRs"
+            if [ "$morning_review_count" -eq 1 ]; then
+                header_text="🌅 Morning Review Summary"
+                pr_text="PR"
+            fi
+            
+            # Start building the JSON payload for morning listing
+            morning_payload='{
+    "text": "Morning review summary",
+    "blocks": [
+        {
+            "type": "header",
+            "text": {
+                "type": "plain_text",
+                "text": "'"${header_text}"' ('"${morning_review_count}"' '"${pr_text}"' pending your review)",
+                "emoji": true
+            }
+        },
+        {
+            "type": "context",
+            "elements": [
+                {
+                    "type": "mrkdwn",
+                    "text": "📋 All PRs where you are requested as a reviewer"
+                }
+            ]
+        }'
+            
+            # Process each PR and add to morning payload
+            temp_file=$(mktemp)
+            printf '%b' "$morning_review_prs" > "$temp_file"
+            
+            while IFS='|' read -r pr_number pr_title pr_author pr_branch pr_url repo_name match_reason is_draft; do
+                # Skip empty lines
+                if [ -z "$pr_number" ]; then
+                    continue
+                fi
+                
+                # Escape special characters for JSON
+                pr_title=$(echo "$pr_title" | sed 's/"/\\"/g' | sed 's/\\/\\\\/g')
+                pr_branch=$(echo "$pr_branch" | sed 's/"/\\"/g' | sed 's/\\/\\\\/g')
+                
+                # Add draft indicator
+                draft_indicator=""
+                if [ "$is_draft" = "true" ]; then
+                    draft_indicator=" *(Draft)*"
+                fi
+                
+                # Add section to morning payload
+                morning_payload="${morning_payload},
+        {
+            \"type\": \"section\",
+            \"fields\": [
+                {
+                    \"type\": \"mrkdwn\",
+                    \"text\": \"*📋 PR #${pr_number}*${draft_indicator}\\n<${pr_url}|${pr_title}>\"
+                },
+                {
+                    \"type\": \"mrkdwn\",
+                    \"text\": \"*Author:* ${pr_author}\\n*Branch:* \`${pr_branch}\`\\n*Repo:* ${repo_name}\"
+                }
+            ]
+        }"
+            done < "$temp_file"
+            
+            # Clean up temp file
+            rm -f "$temp_file"
+            
+            # Close the JSON structure
+            morning_payload="${morning_payload}
+    ]
+}"
+            
+            # Send morning listing to Slack
+            response=$(curl -s -X POST "$SLACK_WEBHOOK_URL" \
+                -H 'Content-Type: application/json' \
+                -d "$morning_payload")
+            
+            if [ "$response" = "ok" ]; then
+                echo -e "${GREEN}✓ Morning review listing sent successfully${NC}"
+                mark_morning_listing_sent
+            else
+                echo -e "${RED}✗ Failed to send morning review listing: ${response}${NC}"
+            fi
+        else
+            echo -e "${BLUE}No PRs pending your review this morning${NC}"
+            mark_morning_listing_sent  # Mark as sent even if no PRs to avoid repeated checks
+        fi
+    else
+        echo -e "${BLUE}Morning review listing already sent today${NC}"
+    fi
 fi
 
 # Counters and data collection

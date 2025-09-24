@@ -54,6 +54,12 @@ ALWAYS_NOTIFY=false
 # Set to false to include all PRs regardless of check status
 FILTER_FAILED_CHECKS=true
 
+# Morning listing of all PRs pending review (true/false)
+# Set to true to send a daily morning summary of all PRs pending your review
+# This runs once per day and shows all PRs where you are requested as a reviewer
+# Honors INCLUDE_DRAFTS and FILTER_FAILED_CHECKS settings
+MORNING_REVIEW_LISTING=true
+
 # Slack webhook URL
 # Set as environment variable or replace with actual URL
 SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL}"

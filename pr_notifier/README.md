@@ -27,6 +27,7 @@ Automated Slack notifications for team pull requests across multiple GitHub repo
 - 📦 **Multi-repository support**: Monitor PRs across all your team's repos
 - 🚫 **Configurable draft PR filtering**: Choose to include or exclude draft PRs
 - 🔔 **Smart notifications**: Only notifies once per PR (no spam)
+- 🌅 **Daily morning review summary**: Get a comprehensive list of all PRs pending your review each morning
 - 📊 **Detailed Slack messages**: Shows PR details with direct links and draft status
 - 📝 **Comprehensive logging**: Tracks all processed PRs and notifications
 
@@ -146,6 +147,12 @@ ALWAYS_NOTIFY=false
 # Set to false to include all PRs regardless of check status
 FILTER_FAILED_CHECKS=true
 
+# Morning listing of all PRs pending review (true/false)
+# Set to true to send a daily morning summary of all PRs pending your review
+# This runs once per day and shows all PRs where you are requested as a reviewer
+# Honors INCLUDE_DRAFTS and FILTER_FAILED_CHECKS settings
+MORNING_REVIEW_LISTING=true
+
 # GitHub CLI path (optional - will use system PATH if not set)
 GITHUB_CLI_PATH="/usr/local/bin"
 
@@ -160,17 +167,14 @@ MAX_PROCESSED_PRS=500  # Maximum number of processed PRs to keep in history
 
 ### Step 6: Set Up Slack Webhook URL
 
-#### Option A: Environment Variable
-```bash
-# Add to ~/.bashrc or ~/.zshrc
-export SLACK_WEBHOOK_URL="https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
-source ~/.bashrc  # or source ~/.zshrc
-```
-
-#### Option B: Directly in config.sh
-Set the webhook URL directly in `config.sh`:
+Add your webhook URL to `config.sh`:
 ```bash
 SLACK_WEBHOOK_URL="https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+```
+
+Alternatively, set it as an environment variable:
+```bash
+export SLACK_WEBHOOK_URL="https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
 ```
 
 ### Step 7: Test the Script
@@ -195,35 +199,35 @@ crontab -e
 
 #### Every 15 minutes:
 ```bash
-*/15 * * * * SLACK_WEBHOOK_URL="your-webhook-url" /home/your-user/scripts/check-team-prs.sh >> /home/your-user/scripts/logs/cron.log 2>&1
+*/15 * * * * /home/your-user/scripts/check-prs-wrapper.sh >> /home/your-user/scripts/logs/cron.log 2>&1
 ```
 
 #### Every 30 minutes during work hours (9am-6pm, Mon-Fri):
 ```bash
-*/30 9-18 * * 1-5 SLACK_WEBHOOK_URL="your-webhook-url" /home/your-user/scripts/check-team-prs.sh >> /home/your-user/scripts/logs/cron.log 2>&1
+*/30 9-18 * * 1-5 /home/your-user/scripts/check-prs-wrapper.sh >> /home/your-user/scripts/logs/cron.log 2>&1
 ```
 
 #### Every hour:
 ```bash
-0 * * * * SLACK_WEBHOOK_URL="your-webhook-url" /home/your-user/scripts/check-team-prs.sh >> /home/your-user/scripts/logs/cron.log 2>&1
+0 * * * * /home/your-user/scripts/check-prs-wrapper.sh >> /home/your-user/scripts/logs/cron.log 2>&1
 ```
 
-### Alternative: Create a Wrapper Script
+### Alternative: Create a Custom Wrapper Script
 
 For cleaner crontab management:
 
 ```bash
-cat > ~/scripts/pr-checker-wrapper.sh << 'EOF'
+cat > ~/scripts/my-pr-checker.sh << 'EOF'
 #!/bin/bash
 export SLACK_WEBHOOK_URL="your-webhook-url-here"
 export PATH="/usr/local/bin:$PATH"  # Ensure gh is in PATH
-/home/your-user/scripts/check-team-prs.sh
+/home/your-user/scripts/check-prs-wrapper.sh
 EOF
 
-chmod +x ~/scripts/pr-checker-wrapper.sh
+chmod +x ~/scripts/my-pr-checker.sh
 
 # Then in crontab:
-*/15 * * * * /home/your-user/scripts/pr-checker-wrapper.sh >> /home/your-user/scripts/logs/cron.log 2>&1
+*/15 * * * * /home/your-user/scripts/my-pr-checker.sh >> /home/your-user/scripts/logs/cron.log 2>&1
 ```
 
 ## GitHub Authentication
@@ -265,9 +269,7 @@ Cron jobs run in a minimal environment without access to your interactive GitHub
 
 ### For Interactive Use
 
-If you're running the script manually, you can either:
-- Use the token in `config.sh` (recommended for consistency)
-- Or authenticate manually: `gh auth login`
+The script will automatically use the token from `config.sh` if available, or fall back to your existing GitHub CLI authentication.
 
 ## Configuration Examples
 
@@ -300,6 +302,7 @@ BRANCH_PREFIXES=("CRX-" "FEATURE-")
 # GITHUB_USER_HANDLE="your-username"    # Filter out PRs you've approved
 # ALWAYS_NOTIFY=true                    # Notify about all matching PRs every time
 # FILTER_FAILED_CHECKS=false            # Include PRs with failed checks
+# MORNING_REVIEW_LISTING=true           # Daily morning summary of pending reviews
 ```
 
 ### Example 4: Monitor Requested Reviewers
@@ -408,6 +411,7 @@ After setup, you'll have:
 ├── config.sh                   # Configuration file
 └── logs/
     ├── processed_team_prs.txt  # Tracks notified PRs
+    ├── morning_listing_sent.txt # Tracks daily morning listing
     ├── pr-check.log           # Main execution log with timestamps
     ├── check_summary.log       # Summary of each run
     └── cron.log               # Cron execution logs
@@ -415,14 +419,21 @@ After setup, you'll have:
 
 ## Slack Notification Format
 
-Notifications include:
-- PR number and title
-- Author username
-- Branch name
-- Repository name
-- Direct link button to view PR
-- Visual indicators for match type (🌿 branch pattern, 👤 team member)
-- Draft status indicator when `INCLUDE_DRAFTS=true`
+### Regular Notifications
+Consolidated notifications include:
+- **Header**: Shows total count of PRs
+- **Legend**: Explains emoji meanings (🌿 Branch Pattern, 👤 Team Member, 👥 Requested Reviewer)
+- **PR List**: Each PR with:
+  - PR number and title (clickable link)
+  - Author, branch, and repository information
+  - Visual indicators for match type
+  - Draft status indicators when applicable
+
+### Morning Review Summary
+Daily morning notifications show:
+- **Header**: "🌅 Morning Review Summary (X PRs pending your review)"
+- **Legend**: "📋 All PRs where you are requested as a reviewer"
+- **PR List**: All PRs pending your review with same details as regular notifications
 
 ## Configuration File (config.sh)
 
@@ -439,6 +450,7 @@ The `config.sh` file centralizes all configuration settings, making it easy to m
 - **GITHUB_USER_HANDLE**: Your GitHub username to filter out already approved PRs
 - **ALWAYS_NOTIFY**: Whether to notify about all matching PRs on every run (`true`/`false`)
 - **FILTER_FAILED_CHECKS**: Whether to exclude PRs with failed CI/CD checks (`true`/`false`)
+- **MORNING_REVIEW_LISTING**: Whether to send daily morning summary of PRs pending your review (`true`/`false`)
 - **SLACK_WEBHOOK_URL**: Slack webhook URL for notifications
 - **GITHUB_CLI_PATH**: Custom path to GitHub CLI (optional)
 - **GITHUB_TOKEN**: GitHub personal access token for authentication (required for cron)
@@ -455,7 +467,7 @@ The `config.sh` file centralizes all configuration settings, making it easy to m
 ## Customization
 
 ### Adjust notification format
-Edit the `send_slack_notification` function to customize the Slack message format.
+Edit the `send_consolidated_slack_notification` function to customize the Slack message format.
 
 ### Configure draft PR handling
 Control whether draft PRs are included in notifications:
