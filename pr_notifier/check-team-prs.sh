@@ -507,6 +507,12 @@ if [ "$MORNING_REVIEW_LISTING" = "true" ] && [ -n "$GITHUB_USER_HANDLE" ]; then
                     continue
                 fi
                 
+                # Skip if user is the author of this PR
+                if [ -n "$GITHUB_USER_HANDLE" ] && [ "$pr_author" = "$GITHUB_USER_HANDLE" ]; then
+                    echo "    • PR #${pr_number} is authored by ${GITHUB_USER_HANDLE} - skipping (${pr_branch})"
+                    continue
+                fi
+                
                 # Check if user has already approved this PR
                 if user_has_approved "$pr_reviews" "$GITHUB_USER_HANDLE"; then
                     echo "    • PR #${pr_number} already approved by ${GITHUB_USER_HANDLE} (${pr_author} - ${pr_branch})"
@@ -713,6 +719,12 @@ for repo in "${REPOS[@]}"; do
         
         # Skip if no match
         if [ -z "$match_reason" ]; then
+            continue
+        fi
+        
+        # Skip if user is the author of this PR
+        if [ -n "$GITHUB_USER_HANDLE" ] && [ "$pr_author" = "$GITHUB_USER_HANDLE" ]; then
+            echo "  • PR #${pr_number} is authored by ${GITHUB_USER_HANDLE} - skipping (${pr_branch})"
             continue
         fi
         
