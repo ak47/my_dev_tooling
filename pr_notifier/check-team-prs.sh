@@ -270,14 +270,14 @@ user_has_approved() {
     return $?
 }
 
-# Function to check if PR has failed automated checks
-pr_has_failed_checks() {
+# Function to check if PR should be filtered due to failed automated checks
+should_filter_pr_for_failed_checks() {
     local repo="$1"
     local pr_number="$2"
     
-    # If CI filtering is disabled, don't check
+    # If CI filtering is disabled, don't filter
     if [ "$FILTER_FAILED_CHECKS" != "true" ]; then
-        return 1
+        return 1  # Don't filter
     fi
     
     # Get the head commit SHA for this PR (more efficient than getting all commits)
@@ -288,7 +288,7 @@ pr_has_failed_checks() {
         if [ "$LOG_LEVEL" = "DEBUG" ]; then
             echo "    Debug: Could not get head SHA for PR #${pr_number}, assuming checks pass"
         fi
-        return 1
+        return 1  # Don't filter
     fi
     
     # Get check runs for this specific commit (more targeted API call)
@@ -299,7 +299,7 @@ pr_has_failed_checks() {
         if [ "$LOG_LEVEL" = "DEBUG" ]; then
             echo "    Debug: Could not get check runs for PR #${pr_number}, assuming checks pass"
         fi
-        return 1
+        return 1  # Don't filter
     fi
     
     # Check if any completed check runs have failed
@@ -309,13 +309,128 @@ pr_has_failed_checks() {
         if [ "$LOG_LEVEL" = "DEBUG" ]; then
             echo "    Debug: PR #${pr_number} has failed checks: $(echo "$failed_checks" | tr '\n' ', ' | sed 's/,$//')"
         fi
-        return 0  # Has failed checks
+        return 0  # Filter this PR out
     fi
     
     if [ "$LOG_LEVEL" = "DEBUG" ]; then
         echo "    Debug: PR #${pr_number} has no failed checks"
     fi
-    return 1  # No failed checks
+    return 1  # Don't filter this PR
+}
+
+# Function to check if morning listing was already sent today
+morning_listing_sent_today() {
+    if [ ! -f "$MORNING_LISTING_FILE" ]; then
+        return 1  # File doesn't exist, so not sent today
+    fi
+    
+    local today=$(date '+%Y-%m-%d')
+    local last_sent=$(cat "$MORNING_LISTING_FILE" 2>/dev/null)
+    
+    if [ "$last_sent" = "$today" ]; then
+        return 0  # Already sent today
+    else
+        return 1  # Not sent today
+    fi
+}
+
+# Function to mark morning listing as sent today
+mark_morning_listing_sent() {
+    local today=$(date '+%Y-%m-%d')
+    echo "$today" > "$MORNING_LISTING_FILE"
+}
+
+# Function to get PRs pending review for morning listing
+get_morning_review_prs() {
+    local morning_prs=""
+    local morning_count=0
+    
+    echo -e "${BLUE}🌅 Collecting PRs pending your review...${NC}"
+    
+    # Process each repository
+    for repo in "${REPOS[@]}"; do
+        echo -e "${BLUE}  Checking ${repo}...${NC}"
+        
+        # Check if repo exists and we have access
+        if ! gh repo view "$repo" &> /dev/null; then
+            echo -e "${RED}    ✗ Cannot access repo ${repo}${NC}"
+            continue
+        fi
+        
+        # Get all open PRs with reviews data
+        local json_fields="number,title,author,headRefName,url,isDraft,reviews"
+        
+        # Store PRs in temporary file to avoid subshell issues
+        local temp_file=$(mktemp)
+        if [ "$INCLUDE_DRAFTS" = "true" ]; then
+            gh pr list \
+                --repo "$repo" \
+                --state open \
+                --limit 100 \
+                --json "$json_fields" | \
+            jq -r '.[] | @json' > "$temp_file"
+        else
+            gh pr list \
+                --repo "$repo" \
+                --state open \
+                --limit 100 \
+                --json "$json_fields" | \
+            jq -r '.[] | select(.isDraft == false) | @json' > "$temp_file"
+        fi
+        
+        while IFS= read -r pr_json; do
+            # Parse PR data
+            local pr_number=$(echo "$pr_json" | jq -r '.number')
+            local pr_title=$(echo "$pr_json" | jq -r '.title')
+            local pr_author=$(echo "$pr_json" | jq -r '.author.login')
+            local pr_branch=$(echo "$pr_json" | jq -r '.headRefName')
+            local pr_url=$(echo "$pr_json" | jq -r '.url')
+            local pr_is_draft=$(echo "$pr_json" | jq -r '.isDraft')
+            local pr_reviews=$(echo "$pr_json" | jq -r '.reviews')
+            
+            # Skip if user is the author of this PR
+            if [ -n "$GITHUB_USER_HANDLE" ] && [ "$pr_author" = "$GITHUB_USER_HANDLE" ]; then
+                continue
+            fi
+            
+            # Check if user has already approved this PR
+            if user_has_approved "$pr_reviews" "$GITHUB_USER_HANDLE"; then
+                continue
+            fi
+            
+            # Check if PR has failed automated checks
+            if should_filter_pr_for_failed_checks "$repo" "$pr_number"; then
+                continue
+            fi
+            
+            # For morning listing, we'll include PRs from team members or matching branch patterns
+            # This is simpler than trying to get review requests which require special permissions
+            local include_pr=false
+            
+            # Include if author is team member
+            if is_team_member "$pr_author"; then
+                include_pr=true
+            fi
+            
+            # Include if branch matches pattern
+            if matches_branch_pattern "$pr_branch"; then
+                include_pr=true
+            fi
+            
+            # Include if it's in our requested reviewers list (simplified approach)
+            # We'll assume if it's a team member or matches branch pattern, it might need review
+            if [ "$include_pr" = "true" ]; then
+                morning_prs="${morning_prs}${pr_number}|${pr_title}|${pr_author}|${pr_branch}|${pr_url}|${repo}|morning|${pr_is_draft}\n"
+                morning_count=$((morning_count + 1))
+                echo -e "${GREEN}    ✓ Found PR #${pr_number} for morning review (${pr_author} - ${pr_branch})${NC}"
+            fi
+        done < "$temp_file"
+        
+        # Clean up temporary file
+        rm -f "$temp_file"
+    done
+    
+    echo "$morning_prs|$morning_count"
 }
 
 # Function to check if PR has requested reviewers we're monitoring
@@ -341,51 +456,6 @@ has_requested_reviewers() {
     done
     
     return 1  # No matching reviewers
-}
-
-# Function to check if morning listing was already sent today
-morning_listing_sent_today() {
-    if [ ! -f "$MORNING_LISTING_FILE" ]; then
-        return 1  # File doesn't exist, so not sent today
-    fi
-    
-    local today=$(date '+%Y-%m-%d')
-    local last_sent=$(cat "$MORNING_LISTING_FILE" 2>/dev/null)
-    
-    if [ "$last_sent" = "$today" ]; then
-        return 0  # Already sent today
-    else
-        return 1  # Not sent today
-    fi
-}
-
-# Function to mark morning listing as sent today
-mark_morning_listing_sent() {
-    local today=$(date '+%Y-%m-%d')
-    echo "$today" > "$MORNING_LISTING_FILE"
-}
-
-# Function to check if user is requested as reviewer for a specific PR
-user_is_requested_reviewer() {
-    local pr_review_requests="$1"
-    local user_handle="$2"
-    
-    # If no user handle configured, return false
-    if [ -z "$user_handle" ]; then
-        return 1
-    fi
-    
-    # If review requests data is not available (no read:org scope), return false
-    if [ -z "$pr_review_requests" ] || [ "$pr_review_requests" = "null" ]; then
-        return 1
-    fi
-    
-    # Check if user is in the requested reviewers list
-    if echo "$pr_review_requests" | jq -r --arg user "$user_handle" '.[] | select(.login == $user) | .login' 2>/dev/null | grep -q "."; then
-        return 0  # User is requested as reviewer
-    fi
-    
-    return 1  # User is not requested as reviewer
 }
 
 # Main execution
@@ -455,89 +525,13 @@ if [ "$MORNING_REVIEW_LISTING" = "true" ] && [ -n "$GITHUB_USER_HANDLE" ]; then
     if ! morning_listing_sent_today; then
         echo -e "\n${BLUE}🌅 Checking for morning review listing...${NC}"
         
-        morning_review_prs=""
-        morning_review_count=0
-        
-        # Process each repository for morning review listing
-        for repo in "${REPOS[@]}"; do
-            echo -e "${BLUE}  Checking ${repo} for pending reviews...${NC}"
-            
-            # Check if repo exists and we have access
-            if ! gh repo view "$repo" &> /dev/null; then
-                echo -e "${RED}    ✗ Cannot access repo ${repo}${NC}"
-                continue
-            fi
-            
-            # Get all open PRs with review requests (honor draft and CI settings)
-            json_fields="number,title,author,headRefName,url,isDraft,reviews,reviewRequests"
-            
-            # Store PRs in temporary file to avoid subshell issues
-            temp_morning_file=$(mktemp)
-            if [ "$INCLUDE_DRAFTS" = "true" ]; then
-                # Include all PRs (drafts and non-drafts)
-                gh pr list \
-                    --repo "$repo" \
-                    --state open \
-                    --limit 100 \
-                    --json "$json_fields" | \
-                jq -r '.[] | @json' > "$temp_morning_file"
-            else
-                # Exclude draft PRs (default behavior)
-                gh pr list \
-                    --repo "$repo" \
-                    --state open \
-                    --limit 100 \
-                    --json "$json_fields" | \
-                jq -r '.[] | select(.isDraft == false) | @json' > "$temp_morning_file"
-            fi
-            
-            while IFS= read -r pr_json; do
-                # Parse PR data
-                pr_number=$(echo "$pr_json" | jq -r '.number')
-                pr_title=$(echo "$pr_json" | jq -r '.title')
-                pr_author=$(echo "$pr_json" | jq -r '.author.login')
-                pr_branch=$(echo "$pr_json" | jq -r '.headRefName')
-                pr_url=$(echo "$pr_json" | jq -r '.url')
-                pr_is_draft=$(echo "$pr_json" | jq -r '.isDraft')
-                pr_reviews=$(echo "$pr_json" | jq -r '.reviews')
-                pr_review_requests=$(echo "$pr_json" | jq -r '.reviewRequests // empty')
-                
-                # Check if user is requested as reviewer
-                if ! user_is_requested_reviewer "$pr_review_requests" "$GITHUB_USER_HANDLE"; then
-                    continue
-                fi
-                
-                # Skip if user is the author of this PR
-                if [ -n "$GITHUB_USER_HANDLE" ] && [ "$pr_author" = "$GITHUB_USER_HANDLE" ]; then
-                    echo "    • PR #${pr_number} is authored by ${GITHUB_USER_HANDLE} - skipping (${pr_branch})"
-                    continue
-                fi
-                
-                # Check if user has already approved this PR
-                if user_has_approved "$pr_reviews" "$GITHUB_USER_HANDLE"; then
-                    echo "    • PR #${pr_number} already approved by ${GITHUB_USER_HANDLE} (${pr_author} - ${pr_branch})"
-                    continue
-                fi
-                
-                # Check if PR has failed automated checks (honor FILTER_FAILED_CHECKS setting)
-                if pr_has_failed_checks "$repo" "$pr_number"; then
-                    echo "    • PR #${pr_number} has failed checks (${pr_author} - ${pr_branch})"
-                    continue
-                fi
-                
-                # Add to morning review list
-                morning_review_prs="${morning_review_prs}${pr_number}|${pr_title}|${pr_author}|${pr_branch}|${pr_url}|${repo}|reviewer|${pr_is_draft}\n"
-                morning_review_count=$((morning_review_count + 1))
-                
-                echo -e "${GREEN}    ✓ Found PR #${pr_number} pending review (${pr_author} - ${pr_branch})${NC}"
-            done < "$temp_morning_file"
-            
-            # Clean up temporary file
-            rm -f "$temp_morning_file"
-        done
+        # Get morning review PRs using the simplified function
+        morning_data=$(get_morning_review_prs)
+        morning_review_prs=$(echo "$morning_data" | cut -d'|' -f1)
+        morning_review_count=$(echo "$morning_data" | cut -d'|' -f2)
         
         # Send morning review listing if there are PRs
-        if [ $morning_review_count -gt 0 ]; then
+        if [ "$morning_review_count" -gt 0 ]; then
             echo -e "\n${BLUE}🌅 Sending morning review listing for ${morning_review_count} PR(s)...${NC}"
             
             # Create morning-specific notification
@@ -565,7 +559,7 @@ if [ "$MORNING_REVIEW_LISTING" = "true" ] && [ -n "$GITHUB_USER_HANDLE" ]; then
             "elements": [
                 {
                     "type": "mrkdwn",
-                    "text": "📋 All PRs where you are requested as a reviewer"
+                    "text": "📋 Team PRs that may need your review"
                 }
             ]
         }'
@@ -735,7 +729,7 @@ for repo in "${REPOS[@]}"; do
         fi
         
         # Check if PR has failed automated checks
-        if pr_has_failed_checks "$repo" "$pr_number"; then
+        if should_filter_pr_for_failed_checks "$repo" "$pr_number"; then
             echo "  • PR #${pr_number} has failed checks (${pr_author} - ${pr_branch})"
             continue
         fi
