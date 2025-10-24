@@ -155,31 +155,13 @@ send_consolidated_slack_notification() {
         pr_text="PR"
     fi
     
-    # Start building the JSON payload
-    local payload='{
-    "text": "Team PRs ready for review",
-    "blocks": [
-        {
-            "type": "header",
-            "text": {
-                "type": "plain_text",
-                "text": "'"${header_text}"' ('"${total_count}"' '"${pr_text}"')",
-                "emoji": true
-            }
-        },
-        {
-            "type": "context",
-            "elements": [
-                {
-                    "type": "mrkdwn",
-                    "text": "🌿 Branch Pattern | 👤 Team Member | 👥 Requested Reviewer"
-                }
-            ]
-        }'
     
     # Process each PR and add to payload
     local temp_file=$(mktemp)
     printf '%b' "$prs_data" > "$temp_file"
+    
+    local pr_sections=""
+    local first_pr=true
     
     while IFS='|' read -r pr_number pr_title pr_author pr_branch pr_url repo_name match_reason is_draft; do
         # Skip empty lines
@@ -188,8 +170,10 @@ send_consolidated_slack_notification() {
         fi
         
         # Escape special characters for JSON
-        pr_title=$(echo "$pr_title" | sed 's/"/\\"/g' | sed 's/\\/\\\\/g')
-        pr_branch=$(echo "$pr_branch" | sed 's/"/\\"/g' | sed 's/\\/\\\\/g')
+        pr_title=$(echo "$pr_title" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed 's/\t/\\t/g' | sed 's/\r/\\r/g' | tr '\n' ' ')
+        pr_branch=$(echo "$pr_branch" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed 's/\t/\\t/g' | sed 's/\r/\\r/g' | tr '\n' ' ')
+        pr_author=$(echo "$pr_author" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed 's/\t/\\t/g' | sed 's/\r/\\r/g' | tr '\n' ' ')
+        repo_name=$(echo "$repo_name" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed 's/\t/\\t/g' | sed 's/\r/\\r/g' | tr '\n' ' ')
         
         # Create match reason emoji
         local match_emoji=""
@@ -209,8 +193,14 @@ send_consolidated_slack_notification() {
             draft_indicator=" *(Draft)*"
         fi
         
+        # Add comma separator for multiple PRs
+        if [ "$first_pr" = "false" ]; then
+            pr_sections="${pr_sections},"
+        fi
+        first_pr=false
+        
         # Add section to payload
-        payload="${payload},
+        pr_sections="${pr_sections}
         {
             \"type\": \"section\",
             \"fields\": [
@@ -229,16 +219,52 @@ send_consolidated_slack_notification() {
     # Clean up temp file
     rm -f "$temp_file"
     
-    # Close the JSON structure
-    payload="${payload}
+    # Build the complete payload
+    payload='{
+    "text": "Team PRs ready for review",
+    "blocks": [
+        {
+            "type": "header",
+            "text": {
+                "type": "plain_text",
+                "text": "'"${header_text}"' ('"${total_count}"' '"${pr_text}"')",
+                "emoji": true
+            }
+        },
+        {
+            "type": "context",
+            "elements": [
+                {
+                    "type": "mrkdwn",
+                    "text": "🌿 Branch Pattern | 👤 Team Member | 👥 Requested Reviewer"
+                }
+            ]
+        },'"${pr_sections}"'
     ]
-}"
+}'
     
     # Debug: Show payload if LOG_LEVEL is DEBUG
     if [ "$LOG_LEVEL" = "DEBUG" ]; then
-        echo "Debug: Slack payload (first 20 lines):"
-        echo "$payload" | head -20
+        echo "Debug: Slack payload (first 50 lines):"
+        echo "$payload" | head -50
         echo "..."
+        echo "Debug: Slack payload (last 10 lines):"
+        echo "$payload" | tail -10
+        echo "Debug: Payload length: $(echo "$payload" | wc -c) characters"
+        
+        # Validate JSON
+        if command -v jq &> /dev/null; then
+            echo "Debug: Validating JSON..."
+            if echo "$payload" | jq . > /dev/null 2>&1; then
+                echo "Debug: ✓ JSON is valid"
+            else
+                echo "Debug: ✗ JSON is invalid"
+                echo "Debug: JSON validation error:"
+                echo "$payload" | jq . 2>&1 | head -5
+            fi
+        else
+            echo "Debug: jq not available for JSON validation"
+        fi
     fi
     
     # Send to Slack
@@ -542,7 +568,58 @@ if [ "$MORNING_REVIEW_LISTING" = "true" ] && [ -n "$GITHUB_USER_HANDLE" ]; then
                 pr_text="PR"
             fi
             
-            # Start building the JSON payload for morning listing
+            # Process each PR and add to morning payload
+            temp_file=$(mktemp)
+            printf '%b' "$morning_review_prs" > "$temp_file"
+            
+            local morning_pr_sections=""
+            local first_morning_pr=true
+            
+            while IFS='|' read -r pr_number pr_title pr_author pr_branch pr_url repo_name match_reason is_draft; do
+                # Skip empty lines
+                if [ -z "$pr_number" ]; then
+                    continue
+                fi
+                
+                # Escape special characters for JSON
+                pr_title=$(echo "$pr_title" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed 's/\t/\\t/g' | sed 's/\r/\\r/g' | tr '\n' ' ')
+                pr_branch=$(echo "$pr_branch" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed 's/\t/\\t/g' | sed 's/\r/\\r/g' | tr '\n' ' ')
+                pr_author=$(echo "$pr_author" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed 's/\t/\\t/g' | sed 's/\r/\\r/g' | tr '\n' ' ')
+                repo_name=$(echo "$repo_name" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed 's/\t/\\t/g' | sed 's/\r/\\r/g' | tr '\n' ' ')
+                
+                # Add draft indicator
+                draft_indicator=""
+                if [ "$is_draft" = "true" ]; then
+                    draft_indicator=" *(Draft)*"
+                fi
+                
+                # Add comma separator for multiple PRs
+                if [ "$first_morning_pr" = "false" ]; then
+                    morning_pr_sections="${morning_pr_sections},"
+                fi
+                first_morning_pr=false
+                
+                # Add section to morning payload
+                morning_pr_sections="${morning_pr_sections}
+        {
+            \"type\": \"section\",
+            \"fields\": [
+                {
+                    \"type\": \"mrkdwn\",
+                    \"text\": \"*📋 PR #${pr_number}*${draft_indicator}\\n<${pr_url}|${pr_title}>\"
+                },
+                {
+                    \"type\": \"mrkdwn\",
+                    \"text\": \"*Author:* ${pr_author}\\n*Branch:* \`${pr_branch}\`\\n*Repo:* ${repo_name}\"
+                }
+            ]
+        }"
+            done < "$temp_file"
+            
+            # Clean up temp file
+            rm -f "$temp_file"
+            
+            # Build the complete morning payload
             morning_payload='{
     "text": "Morning review summary",
     "blocks": [
@@ -562,52 +639,9 @@ if [ "$MORNING_REVIEW_LISTING" = "true" ] && [ -n "$GITHUB_USER_HANDLE" ]; then
                     "text": "📋 Team PRs that may need your review"
                 }
             ]
-        }'
-            
-            # Process each PR and add to morning payload
-            temp_file=$(mktemp)
-            printf '%b' "$morning_review_prs" > "$temp_file"
-            
-            while IFS='|' read -r pr_number pr_title pr_author pr_branch pr_url repo_name match_reason is_draft; do
-                # Skip empty lines
-                if [ -z "$pr_number" ]; then
-                    continue
-                fi
-                
-                # Escape special characters for JSON
-                pr_title=$(echo "$pr_title" | sed 's/"/\\"/g' | sed 's/\\/\\\\/g')
-                pr_branch=$(echo "$pr_branch" | sed 's/"/\\"/g' | sed 's/\\/\\\\/g')
-                
-                # Add draft indicator
-                draft_indicator=""
-                if [ "$is_draft" = "true" ]; then
-                    draft_indicator=" *(Draft)*"
-                fi
-                
-                # Add section to morning payload
-                morning_payload="${morning_payload},
-        {
-            \"type\": \"section\",
-            \"fields\": [
-                {
-                    \"type\": \"mrkdwn\",
-                    \"text\": \"*📋 PR #${pr_number}*${draft_indicator}\\n<${pr_url}|${pr_title}>\"
-                },
-                {
-                    \"type\": \"mrkdwn\",
-                    \"text\": \"*Author:* ${pr_author}\\n*Branch:* \`${pr_branch}\`\\n*Repo:* ${repo_name}\"
-                }
-            ]
-        }"
-            done < "$temp_file"
-            
-            # Clean up temp file
-            rm -f "$temp_file"
-            
-            # Close the JSON structure
-            morning_payload="${morning_payload}
+        },'"${morning_pr_sections}"'
     ]
-}"
+}'
             
             # Send morning listing to Slack
             response=$(curl -s -X POST "$SLACK_WEBHOOK_URL" \
